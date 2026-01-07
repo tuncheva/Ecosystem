@@ -19,20 +19,16 @@ The host spawns both MCP servers automatically (one-command run).
 You already have a `.env` at repo root. Required keys:
 
 - `VELOCITY_API_KEY`
-- `VELOCITY_MODEL` (e.g. `gpt-5.2`)
-- `VELOCITY_CHAT_COMPLETED_URL` (optional; defaults to `https://chat.velocity.online/api/chat/completed`)
+- `VELOCITY_BASE_URL` (e.g. `https://chat.velocity.online/api`)
+- `VELOCITY_MODEL` (a supported model id from `GET https://chat.velocity.online/api/models`)
 
 Example:
 
 ```ini
 VELOCITY_API_KEY=...
-VELOCITY_MODEL=gpt-5.2
-VELOCITY_CHAT_COMPLETED_URL=https://chat.velocity.online/api/chat/completed
+VELOCITY_BASE_URL=https://chat.velocity.online/api
+VELOCITY_MODEL=nebius.deepseek-ai/DeepSeek-V3-0324
 ```
-
-Notes:
-- You can keep `VELOCITY_BASE_URL` in `.env` if other tooling needs it.
-- The demo Host uses the custom gateway endpoint configured in [`load_settings()`](config.py:34).
 
 ## 2) Install deps
 
@@ -44,7 +40,7 @@ py -m venv .venv
 pip install -r requirements.txt
 ```
 
-## 3) Run
+## 3) Run (CLI)
 
 PowerShell:
 
@@ -71,11 +67,25 @@ Expected behavior:
   - `email.sendShippingConfirmation({"email":..., "order_details":...})`
 - Host prints a final summary.
 
+## 4) Run (Web UI)
+
+Start the web server:
+
+```bat
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.web_app:app --host 127.0.0.1 --port 8000
+```
+
+Open:
+- http://127.0.0.1:8000
+
+Click **Run workflow** to execute the exact lab prompt (`Process new order #XYZ-789.`) and view logs + final summary.
+
 ## Troubleshooting
 
 ### 405 / Method Not Allowed
-That error usually happens when you call an OpenAI-style endpoint that your gateway does not expose.
-This demo calls the custom endpoint in [`_velocity_chat_completed()`](host_agent.py:19).
+If you see 405 calling the base URL (e.g. `https://chat.velocity.online/api`), it means you hit a route that doesn't accept the method.
+The host calls the OpenAI-style chat endpoint under your base URL (see [`_velocity_chat_completed()`](host_agent.py:20)).
 
 ### Gateway response format mismatch
 If the gateway returns a different JSON shape than expected, update only:
