@@ -1,64 +1,4 @@
-from __future__ import annotations
-
-import asyncio
-import time
-import uuid
-from dataclasses import dataclass, field
-from typing import Any
-
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-
-from app.run_workflow import run_order_workflow
-from config import load_settings
-
-
-@dataclass
-class RunState:
-    run_id: str
-    created_at: float = field(default_factory=lambda: time.time())
-    status: str = "running"  # running|succeeded|failed
-    logs: list[dict[str, Any]] = field(default_factory=list)
-    final: str | None = None
-    error: str | None = None
-
-
-app = FastAPI(title="Module 6 Autonomous Operations Agent")
-
-_RUNS: dict[str, RunState] = {}
-
-
-def _append_event(run: RunState, event: dict[str, Any]) -> None:
-    event = dict(event)
-    event.setdefault("ts", time.time())
-    run.logs.append(event)
-
-
-async def _run_background(run: RunState) -> None:
-    try:
-        # IMPORTANT:
-        # Do not redirect stdout/stderr under uvicorn for this lab.
-        # MCP stdio transport requires real file descriptors and redirecting can throw:
-        # UnsupportedOperation('fileno')
-        settings = load_settings()
-
-        final = await run_order_workflow(settings=settings, event_sink=lambda e: _append_event(run, e))
-        run.final = final
-        run.status = "succeeded"
-        _append_event(run, {"type": "final", "content": final})
-
-    except Exception as e:
-        run.status = "failed"
-        run.error = repr(e)
-        _append_event(run, {"type": "error", "error": run.error})
-
-
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    # Minimal self-contained UI (no build step)
-    # NOTE: keep JS template-literal-free and avoid backticks.
-    # NOTE: never embed literal newlines inside JS string literals in this HTML.
-    return """<!doctype html>
+<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -264,6 +204,15 @@ def index() -> str:
       background: rgba(255,255,255,0.04);
       white-space: nowrap;
     }
+
+    .kbd {
+      font-family: var(--mono);
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04);
+      padding: 2px 6px;
+      border-radius: 8px;
+      color: rgba(255,255,255,0.82);
+    }
   </style>
 </head>
 <body>
@@ -404,7 +353,8 @@ def index() -> str:
 
     // Assistant answer bubble + process bubble directly under it.
     const answerBubble = appendBubble('assistant', 'answer', 'Working on it...', Date.now()/1000);
-    const processBubble = appendBubble('assistant', 'process', 'Process:\\n- Starting...', Date.now()/1000);
+    const processBubble = appendBubble('assistant', 'process', 'Process:
+- Starting...', Date.now()/1000);
 
     const processLines = [];
 
@@ -429,7 +379,8 @@ def index() -> str:
           const txt = await r.text();
           setStatus('poll failed (' + r.status + ')');
           if (answerBubble) answerBubble.textContent = 'UI polling error.';
-          if (processBubble) processBubble.textContent = 'Process:\\n- [ui] poll error: ' + txt;
+          if (processBubble) processBubble.textContent = 'Process:
+- [ui] poll error: ' + txt;
           return;
         }
 
@@ -445,7 +396,9 @@ def index() -> str:
               if (processLines.length === 0 || processLines[processLines.length - 1] !== line) {
                 processLines.push(line);
               }
-              if (processBubble) processBubble.textContent = 'Process:\\n- ' + processLines.join('\\n- ');
+              if (processBubble) processBubble.textContent = 'Process:
+- ' + processLines.join('
+- ');
             }
 
             if (ev && ev.type === 'final') {
@@ -453,7 +406,8 @@ def index() -> str:
             }
             if (ev && ev.type === 'error') {
               if (answerBubble) answerBubble.textContent = 'Workflow failed.';
-              if (processBubble) processBubble.textContent = 'Process:\\n- [error] ' + String(ev.error || '');
+              if (processBubble) processBubble.textContent = 'Process:
+- [error] ' + String(ev.error || '');
             }
           }
           lastLen = logs.length;
@@ -478,40 +432,14 @@ def index() -> str:
   initChat();
 
   if (runBtn) {
-    runBtn.onclick = function () {
+    runBtn.addEventListener('click', () => {
       startRun().catch(err => {
         setStatus('failed to start');
         if (runBtn) runBtn.disabled = false;
         appendBubble('assistant', 'error', '[ui] start error: ' + String(err), Date.now()/1000);
       });
-    };
+    });
   }
 </script>
 </body>
-</html>"""
-
-
-@app.post('/api/runs')
-async def create_run() -> dict[str, str]:
-    run_id = uuid.uuid4().hex
-    run = RunState(run_id=run_id)
-    _RUNS[run_id] = run
-
-    asyncio.create_task(_run_background(run))
-
-    return {'run_id': run_id}
-
-
-@app.get('/api/runs/{run_id}')
-async def get_run(run_id: str) -> dict[str, Any]:
-    run = _RUNS.get(run_id)
-    if run is None:
-        return {'run_id': run_id, 'status': 'not_found', 'logs': []}
-
-    return {
-        'run_id': run.run_id,
-        'status': run.status,
-        'logs': run.logs,
-        'final': run.final,
-        'error': run.error,
-    }
+</html>
