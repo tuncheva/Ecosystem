@@ -37,6 +37,11 @@ def _extract_assistant_and_tool_calls(gateway_json: dict[str, Any]) -> tuple[str
       (assistant_text, tool_calls)
 
     tool_calls is list of {id, name, arguments} where arguments is a JSON string.
+
+    Notes:
+      Some OpenAI-compatible gateways return tool calls but no assistant content. In that
+      case we MUST return an empty assistant_text (not the raw envelope), otherwise the UI
+      will display noisy artifacts like `envolvfunction<|tool_sep|>...`.
     """
 
     # 1) OpenAI-like: {choices:[{message:{content, tool_calls:[{id,function:{name,arguments}}]}}]}
@@ -69,7 +74,24 @@ def _extract_assistant_and_tool_calls(gateway_json: dict[str, Any]) -> tuple[str
             )
         return assistant_text, calls
 
-    # 3) Fallback: treat entire payload as text
+    # 3) If we can detect tool_calls in an OpenAI-ish envelope but content is missing,
+    # avoid dumping the whole payload into the chat transcript.
+    if isinstance(gateway_json.get("choices"), list) and gateway_json["choices"]:
+        msg = (gateway_json["choices"][0] or {}).get("message") or {}
+        if msg.get("tool_calls"):
+            calls = []
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                calls.append(
+                    {
+                        "id": tc.get("id") or "toolcall_1",
+                        "name": fn.get("name") or "",
+                        "arguments": fn.get("arguments") or "{}",
+                    }
+                )
+            return "", calls
+
+    # 4) Fallback: treat entire payload as text
     return json.dumps(gateway_json)[:2000], []
 
 
@@ -119,11 +141,16 @@ async def _velocity_chat_completions(
         raise RuntimeError(f"Gateway returned non-JSON: {resp.text[:500]!r}") from e
 
 
-async def run_order_workflow(*, settings: Settings, event_sink: EventSink | None = None) -> str:
-    """Runs the exact lab workflow.
+async def run_order_workflow(
+    *,
+    settings: Settings,
+    order_id: str = "XYZ-789",
+    event_sink: EventSink | None = None,
+) -> str:
+    """Runs the lab workflow.
 
-    Prompt is fixed to:
-      Process new order #XYZ-789.
+    Prompt:
+      Process new order #<order_id>.
 
     This function is designed to be called from both CLI and web UI.
     """
@@ -199,7 +226,9 @@ async def run_order_workflow(*, settings: Settings, event_sink: EventSink | None
             "Workflow: look up customer email for the order, then send a shipping confirmation email. "
             "After completing, respond with a short summary of actions taken."
         )
-        user = "Process new order #XYZ-789."
+
+        normalized_order_id = order_id.strip().lstrip("#").upper()
+        user = f"Process new order #{normalized_order_id}."
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},

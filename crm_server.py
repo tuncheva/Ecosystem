@@ -8,6 +8,8 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("crm")
 
 # Mock CRM datastore (order_id -> customer record)
+# NOTE: The lab still runs the fixed prompt/order (XYZ-789), but the system contains
+# a few orders to better illustrate “multiple records” in the dashboard.
 _MOCK_ORDERS: dict[str, dict[str, str]] = {
     "XYZ-789": {
         "customer_id": "CUST-1001",
@@ -17,7 +19,12 @@ _MOCK_ORDERS: dict[str, dict[str, str]] = {
     "ABC-123": {
         "customer_id": "CUST-1002",
         "name": "Jordan Lee",
-        "email": "jordan.lee@example.com",
+        "email": "alice@acme.com",
+    },
+    "QWE-456": {
+        "customer_id": "CUST-1003",
+        "name": "Casey Nguyen",
+        "email": "bob@contoso.com",
     },
 }
 

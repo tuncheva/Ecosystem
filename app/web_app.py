@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
 from app.run_workflow import run_order_workflow
@@ -42,7 +42,11 @@ async def _run_background(run: RunState) -> None:
         # UnsupportedOperation('fileno')
         settings = load_settings()
 
-        final = await run_order_workflow(settings=settings, event_sink=lambda e: _append_event(run, e))
+        final = await run_order_workflow(
+            settings=settings,
+            order_id=(run.logs[0].get("order_id") if run.logs else "XYZ-789"),
+            event_sink=lambda e: _append_event(run, e),
+        )
         run.final = final
         run.status = "succeeded"
         _append_event(run, {"type": "final", "content": final})
@@ -55,7 +59,7 @@ async def _run_background(run: RunState) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    # Minimal self-contained UI (no build step)
+    # Dashboard-style UI (no build step)
     # NOTE: keep JS template-literal-free and avoid backticks.
     # NOTE: never embed literal newlines inside JS string literals in this HTML.
     return """<!doctype html>
@@ -66,14 +70,16 @@ def index() -> str:
   <title>Autonomous Ops Agent (Module 6)</title>
   <style>
     :root {
-      --bg: #0b0f17;
-      --panel: #0f1623;
-      --panel2: #0f1623;
+      --bg: #05070e;
+      --panel: rgba(255,255,255,0.04);
+      --panel2: rgba(255,255,255,0.03);
       --text: rgba(255,255,255,0.92);
       --muted: rgba(255,255,255,0.62);
       --border: rgba(255,255,255,0.10);
+      --border2: rgba(255,255,255,0.07);
       --blue: #3b82f6;
-      --shadow: 0 10px 28px rgba(0,0,0,0.45);
+      --blue2: rgba(59,130,246,0.18);
+      --shadow: 0 18px 46px rgba(0,0,0,0.55);
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
@@ -82,52 +88,51 @@ def index() -> str:
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, Segoe UI, Arial;
-      background: var(--bg);
+      background:
+        radial-gradient(900px 500px at 20% 0%, rgba(59,130,246,0.12), transparent 55%),
+        radial-gradient(1100px 520px at 90% 15%, rgba(99,102,241,0.10), transparent 50%),
+        var(--bg);
       color: var(--text);
     }
 
-    .wrap { max-width: 980px; margin: 0 auto; padding: 22px 14px 30px; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 14px 26px; }
 
-    .header { margin-bottom: 12px; }
-    h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
 
-    .subtitle { color: var(--muted); font-size: 13px; margin-top: 6px; }
-    .subtitle code {
+    .title h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
+    .title .subtitle { margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .title code {
       font-family: var(--mono);
-      background: rgba(255,255,255,0.05);
+      background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.10);
       padding: 3px 8px;
-      border-radius: 10px;
+      border-radius: 999px;
       color: rgba(255,255,255,0.88);
     }
 
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    .toolbar {
+    .right {
       display: flex;
+      gap: 10px;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: var(--panel2);
+      justify-content: flex-end;
+      flex-wrap: wrap;
     }
 
-    .badge {
+    .chip {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 10px;
+      padding: 7px 10px;
       border-radius: 999px;
-      border: 1px solid rgba(59,130,246,0.32);
-      background: rgba(59,130,246,0.10);
-      color: rgba(255,255,255,0.92);
+      border: 1px solid var(--border2);
+      background: rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.82);
       font-size: 12px;
       white-space: nowrap;
     }
@@ -137,159 +142,218 @@ def index() -> str:
       height: 8px;
       border-radius: 50%;
       background: var(--blue);
-      box-shadow: 0 0 0 4px rgba(59,130,246,0.15);
+      box-shadow: 0 0 0 4px rgba(59,130,246,0.16);
     }
 
-    .status {
-      color: var(--muted);
-      font-size: 12px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 520px;
-    }
-
-    .chat {
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      min-height: 420px;
-      max-height: 66vh;
-      overflow: auto;
-      background: var(--panel);
-    }
-
-    .row { display: flex; gap: 10px; align-items: flex-start; }
-    .row.user { justify-content: flex-end; }
-
-    .avatar {
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.10);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: rgba(255,255,255,0.85);
-      font-weight: 800;
-      flex: 0 0 auto;
-    }
-
-    .bubble {
-      padding: 12px 12px;
-      border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.05);
-      color: rgba(255,255,255,0.92);
-      line-height: 1.35;
-      white-space: pre-wrap;
-      max-width: 820px;
-    }
-
-    .bubble.user {
-      background: rgba(59,130,246,0.14);
-      border-color: rgba(59,130,246,0.26);
-    }
-
-    .bubble.process {
-      background: rgba(255,255,255,0.035);
-      border-color: rgba(255,255,255,0.10);
-      color: rgba(255,255,255,0.80);
-      font-family: var(--mono);
-      font-size: 12px;
-      margin-top: 10px;
-    }
-
-    .meta {
-      color: rgba(255,255,255,0.55);
-      font-size: 11px;
-      margin-top: 6px;
-    }
-
-    .composer {
-      display: flex;
-      gap: 10px;
-      padding: 12px;
-      border-top: 1px solid var(--border);
-      background: var(--panel2);
-      align-items: center;
-    }
-
-    .composer .ghost {
-      flex: 1;
-      color: rgba(255,255,255,0.55);
-      font-size: 12px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.03);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    button {
+    .btn {
       appearance: none;
       border: 1px solid rgba(59,130,246,0.55);
-      background: rgba(59,130,246,0.95);
+      background: linear-gradient(180deg, rgba(59,130,246,0.98), rgba(59,130,246,0.78));
       color: white;
       padding: 10px 14px;
       border-radius: 12px;
       font-size: 13px;
       font-weight: 800;
       cursor: pointer;
-      box-shadow: 0 10px 18px rgba(59,130,246,0.18);
+      box-shadow: 0 14px 22px rgba(59,130,246,0.16);
+    }
+    .btn:hover { filter: brightness(1.04); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; filter: none; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 14px;
     }
 
-    button:hover { filter: brightness(1.04); }
-    button:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; filter: none; }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
 
-    .footer {
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card .hd {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: 10px;
-      padding: 10px 12px;
-      border-top: 1px solid var(--border);
+      padding: 12px 12px;
       background: var(--panel2);
-      color: var(--muted);
+      border-bottom: 1px solid var(--border2);
+    }
+
+    .card .hd .h { font-weight: 900; letter-spacing: 0.2px; font-size: 13px; color: rgba(255,255,255,0.90); }
+    .card .bd { padding: 12px; }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--border2);
+      background: rgba(0,0,0,0.16);
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+
+    .kv .k { color: var(--muted); font-size: 12px; }
+    .kv .v { font-family: var(--mono); font-size: 12px; color: rgba(255,255,255,0.90); }
+
+    .orders {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .order {
+      border: 1px solid var(--border2);
+      background: rgba(255,255,255,0.03);
+      border-radius: 14px;
+      padding: 10px;
+    }
+
+    .order .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .order .id {
+      font-family: var(--mono);
+      font-weight: 900;
       font-size: 12px;
-      flex-wrap: wrap;
+      color: rgba(255,255,255,0.92);
     }
 
     .pill {
-      padding: 6px 10px;
+      padding: 5px 8px;
       border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border2);
+      background: rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.72);
+      font-size: 11px;
       white-space: nowrap;
+    }
+
+    .pill.primary {
+      border-color: rgba(59,130,246,0.40);
+      background: rgba(59,130,246,0.12);
+      color: rgba(255,255,255,0.88);
+    }
+
+    .order .meta {
+      color: rgba(255,255,255,0.70);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .mono { font-family: var(--mono); }
+
+    .two {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+
+    .log {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      min-height: 160px;
+      max-height: 270px;
+      overflow: auto;
+      padding: 12px;
+      border: 1px solid var(--border2);
+      border-radius: 14px;
+      background: rgba(0,0,0,0.18);
+      color: rgba(255,255,255,0.82);
+    }
+
+    .answer {
+      padding: 14px;
+      border: 1px solid rgba(59,130,246,0.22);
+      border-radius: 14px;
+      background: rgba(59,130,246,0.08);
+      color: rgba(255,255,255,0.96);
+      line-height: 1.45;
+      white-space: pre-wrap;
+      min-height: 96px;
+      box-shadow: 0 12px 26px rgba(0,0,0,0.40);
+    }
+
+    .answer.empty { color: rgba(255,255,255,0.60); }
+
+    .diag {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      color: rgba(255,255,255,0.65);
+      font-size: 12px;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="header">
-      <h1>Autonomous Operations Agent</h1>
-      <div class="subtitle">Prompt: <code id="promptText">Process new order #XYZ-789.</code></div>
+    <div class="topbar">
+      <div class="title">
+        <h1>Autonomous Operations Agent</h1>
+        <div class="subtitle">Lab prompt: <code id="promptText">Process new order #XYZ-789.</code></div>
+      </div>
+      <div class="right">
+        <div class="chip"><span class="dot"></span> MCP Host + Tools</div>
+        <div class="chip">Status: <span id="status">idle</span></div>
+        <button class="btn" id="runBtn" style="display:none">Run workflow</button>
+      </div>
     </div>
 
-    <div class="panel">
-      <div class="toolbar">
-        <div class="badge"><span class="dot"></span> MCP Host + Tools</div>
-        <div id="status" class="status">idle</div>
+    <div class="grid">
+      <div class="card">
+        <div class="hd">
+          <div class="h">Orders (mock CRM)</div>
+          <div class="pill primary">click an order to run</div>
+        </div>
+        <div class="bd">
+          <div class="kv"><div class="k">Prompt</div><div class="v" id="ghostPrompt">Process new order #XYZ-789.</div></div>
+          <div class="orders" id="orders"></div>
+          <div class="diag">
+            <div class="pill">UI: dashboard view</div>
+            <div class="pill">MCP: stdio servers</div>
+            <div class="pill">Diag: <span id="uiDiag">ui loaded</span></div>
+          </div>
+        </div>
       </div>
 
-      <div class="chat" id="chat"></div>
+      <div class="two">
+        <div class="card">
+          <div class="hd">
+            <div class="h">Processing timeline</div>
+            <div class="pill" id="runIdPill">run: -</div>
+          </div>
+          <div class="bd">
+            <div class="log" id="processLog">Process:\\n- Select an order to run...</div>
+          </div>
+        </div>
 
-      <div class="composer">
-        <div class="ghost" id="ghostPrompt">Process new order #XYZ-789.</div>
-        <button id="runBtn">Run workflow</button>
-      </div>
-
-      <div class="footer">
-        <div class="pill">UI: process + final answer</div>
-        <div class="pill">Terminal: tool/host logs</div>
-        <div class="pill">Status: <span id="uiDiag">ui loaded</span></div>
+        <div class="card">
+          <div class="hd">
+            <div class="h">Output</div>
+            <div class="pill" id="resultPill">result: -</div>
+          </div>
+          <div class="bd">
+            <div class="answer empty" id="finalAnswer">Click an order to run the agent.</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -298,66 +362,66 @@ def index() -> str:
   const runBtn = document.getElementById('runBtn');
   const statusEl = document.getElementById('status');
   const uiDiag = document.getElementById('uiDiag');
-  const chatEl = document.getElementById('chat');
   const promptTextEl = document.getElementById('promptText');
   const ghostPromptEl = document.getElementById('ghostPrompt');
+  const ordersEl = document.getElementById('orders');
+  const processLogEl = document.getElementById('processLog');
+  const finalAnswerEl = document.getElementById('finalAnswer');
+  const runIdPillEl = document.getElementById('runIdPill');
+  const resultPillEl = document.getElementById('resultPill');
 
-  const PROMPT = 'Process new order #XYZ-789.';
+  const PROMPT_PREFIX = 'Process new order #';
 
-  function nowIso(tsSeconds) {
-    try {
-      const ms = (tsSeconds ? (tsSeconds * 1000) : Date.now());
-      return new Date(ms).toISOString();
-    } catch (_) {
-      return '';
-    }
-  }
-
-  function appendBubble(role, kind, text, ts) {
-    if (!chatEl) return null;
-
-    const row = document.createElement('div');
-    row.className = 'row' + (role === 'user' ? ' user' : '');
-
-    if (role !== 'user') {
-      const av = document.createElement('div');
-      av.className = 'avatar';
-      av.textContent = 'A';
-      row.appendChild(av);
-    }
-
-    const bubble = document.createElement('div');
-    const isUser = (role === 'user');
-    const isProcess = (kind === 'process');
-    bubble.className = 'bubble' + (isUser ? ' user' : '') + (isProcess ? ' process' : '');
-    bubble.textContent = text || '';
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const stamp = nowIso(ts);
-    meta.textContent = stamp ? (kind + ' • ' + stamp) : kind;
-
-    const wrap = document.createElement('div');
-    wrap.appendChild(bubble);
-    wrap.appendChild(meta);
-
-    row.appendChild(wrap);
-
-    if (isUser) {
-      const av = document.createElement('div');
-      av.className = 'avatar';
-      av.textContent = 'U';
-      row.appendChild(av);
-    }
-
-    chatEl.appendChild(row);
-    chatEl.scrollTop = chatEl.scrollHeight;
-
-    return bubble;
-  }
+  const MOCK_ORDERS = [
+    { id: 'XYZ-789', email: 'customer@example.com', customer: 'Taylor Rivera', status: 'active demo' },
+    { id: 'ABC-123', email: 'alice@acme.com', customer: 'Jordan Lee', status: 'active demo' },
+    { id: 'QWE-456', email: 'bob@contoso.com', customer: 'Casey Nguyen', status: 'active demo' }
+  ];
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
+  }
+
+  function setRunMeta(runId, status) {
+    if (runIdPillEl) runIdPillEl.textContent = 'run: ' + (runId || '-');
+    if (resultPillEl) resultPillEl.textContent = 'result: ' + (status || '-');
+  }
+
+  function renderOrders() {
+    if (!ordersEl) return;
+    ordersEl.textContent = '';
+
+    for (let i = 0; i < MOCK_ORDERS.length; i++) {
+      const o = MOCK_ORDERS[i];
+      const el = document.createElement('div');
+      el.className = 'order';
+      el.setAttribute('data-order-id', o.id);
+      el.style.cursor = 'pointer';
+
+      const top = document.createElement('div');
+      top.className = 'top';
+
+      const id = document.createElement('div');
+      id.className = 'id';
+      id.textContent = '#' + o.id;
+
+      const pill = document.createElement('div');
+      pill.className = 'pill primary';
+      pill.textContent = o.status;
+
+      top.appendChild(id);
+      top.appendChild(pill);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.innerHTML = '<div><span class="mono">' + o.email + '</span></div>' +
+                       '<div>' + o.customer + '</div>';
+
+      el.appendChild(top);
+      el.appendChild(meta);
+
+      ordersEl.appendChild(el);
+    }
   }
 
   function toProcessLine(ev) {
@@ -370,9 +434,7 @@ def index() -> str:
       return 'Connected to tool server: ' + String(ev.name || '');
     }
 
-    if (ev.type === 'gateway_request') {
-      return 'Contacting model gateway...';
-    }
+    if (ev.type === 'gateway_request') return 'Contacting model gateway...';
 
     if (ev.type === 'assistant') {
       const hasText = (ev.content && String(ev.content).trim());
@@ -387,31 +449,35 @@ def index() -> str:
       return 'Calling tool: ' + n;
     }
 
-    if (ev.type === 'stdout') return '';
+    if (ev.type === 'final') return 'Completed.';
+
+    if (ev.type === 'error') return 'Failed.';
 
     return '';
   }
 
-  function initChat() {
-    if (!chatEl) return;
-    chatEl.textContent = '';
-    appendBubble('assistant', 'info', 'Click Run workflow to process the order via MCP.', Date.now()/1000);
+  function resetPanels() {
+    if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- Select an order to run...';
+    if (finalAnswerEl) {
+      finalAnswerEl.textContent = 'Click an order to run the agent.';
+      finalAnswerEl.className = 'answer empty';
+    }
+    setRunMeta('', '');
   }
 
-  async function startRun() {
-    // Only show the user prompt once the workflow starts.
-    appendBubble('user', 'user', PROMPT, Date.now()/1000);
-
-    // Assistant answer bubble + process bubble directly under it.
-    const answerBubble = appendBubble('assistant', 'answer', 'Working on it...', Date.now()/1000);
-    const processBubble = appendBubble('assistant', 'process', 'Process:\\n- Starting...', Date.now()/1000);
-
-    const processLines = [];
+  async function startRun(orderId) {
+    const oid = String(orderId || '').trim().replace(/^#/, '').toUpperCase();
+    if (!oid) throw new Error('Missing order id');
 
     if (runBtn) runBtn.disabled = true;
     setStatus('starting...');
+    setRunMeta('-', 'starting');
 
-    const resp = await fetch('/api/runs', { method: 'POST' });
+    resetPanels();
+
+    if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- Starting order #' + oid + '...';
+
+    const resp = await fetch('/api/runs?order_id=' + encodeURIComponent(oid), { method: 'POST' });
     if (!resp.ok) {
       const txt = await resp.text();
       throw new Error('POST /api/runs failed: ' + resp.status + ' ' + txt);
@@ -419,22 +485,30 @@ def index() -> str:
 
     const data = await resp.json();
     const runId = data.run_id;
-    setStatus('running (' + runId + ')');
+    setStatus('running');
+    setRunMeta(runId, 'running');
 
+    const processLines = [];
     let lastLen = 0;
+
     const timer = setInterval(async () => {
       try {
         const r = await fetch('/api/runs/' + runId);
         if (!r.ok) {
           const txt = await r.text();
-          setStatus('poll failed (' + r.status + ')');
-          if (answerBubble) answerBubble.textContent = 'UI polling error.';
-          if (processBubble) processBubble.textContent = 'Process:\\n- [ui] poll error: ' + txt;
+          setStatus('poll failed');
+          setRunMeta(runId, 'poll failed');
+          if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- [ui] poll error: ' + txt;
+          if (finalAnswerEl) {
+            finalAnswerEl.textContent = 'UI polling error.';
+            finalAnswerEl.className = 'answer';
+          }
           return;
         }
 
         const s = await r.json();
-        setStatus(s.status + (s.error ? ' (error)' : ''));
+        setStatus(s.status);
+        setRunMeta(runId, s.status + (s.error ? ' error' : ''));
 
         const logs = s.logs || [];
         if (logs.length > lastLen) {
@@ -445,15 +519,22 @@ def index() -> str:
               if (processLines.length === 0 || processLines[processLines.length - 1] !== line) {
                 processLines.push(line);
               }
-              if (processBubble) processBubble.textContent = 'Process:\\n- ' + processLines.join('\\n- ');
+              // Use real newlines in JS strings (avoid embedding literal newlines in the HTML source).
+              if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- ' + processLines.join(String.fromCharCode(10) + '- ');
             }
 
             if (ev && ev.type === 'final') {
-              if (answerBubble) answerBubble.textContent = String(ev.content || '');
+              if (finalAnswerEl) {
+                finalAnswerEl.textContent = String(ev.content || '');
+                finalAnswerEl.className = 'answer';
+              }
             }
             if (ev && ev.type === 'error') {
-              if (answerBubble) answerBubble.textContent = 'Workflow failed.';
-              if (processBubble) processBubble.textContent = 'Process:\\n- [error] ' + String(ev.error || '');
+              if (finalAnswerEl) {
+                finalAnswerEl.textContent = 'Workflow failed.';
+                finalAnswerEl.className = 'answer';
+              }
+              if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- [error] ' + String(ev.error || '');
             }
           }
           lastLen = logs.length;
@@ -462,28 +543,46 @@ def index() -> str:
         if (s.status !== 'running') {
           clearInterval(timer);
           if (runBtn) runBtn.disabled = false;
+          setRunMeta(runId, s.status);
         }
       } catch (e) {
         setStatus('poll exception');
-        appendBubble('assistant', 'error', '[ui] poll exception: ' + String(e), Date.now()/1000);
+        setRunMeta(runId, 'poll exception');
+        if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- [ui] poll exception: ' + String(e);
         if (runBtn) runBtn.disabled = false;
       }
     }, 750);
   }
 
   if (uiDiag) uiDiag.textContent = 'ui loaded';
-  if (promptTextEl) promptTextEl.textContent = PROMPT;
-  if (ghostPromptEl) ghostPromptEl.textContent = PROMPT;
+  if (promptTextEl) promptTextEl.textContent = PROMPT_PREFIX + '...';
+  if (ghostPromptEl) ghostPromptEl.textContent = PROMPT_PREFIX + '...';
 
-  initChat();
+  renderOrders();
+  resetPanels();
 
-  if (runBtn) {
-    runBtn.onclick = function () {
-      startRun().catch(err => {
-        setStatus('failed to start');
-        if (runBtn) runBtn.disabled = false;
-        appendBubble('assistant', 'error', '[ui] start error: ' + String(err), Date.now()/1000);
-      });
+  // Clicking an order card runs the workflow.
+  if (ordersEl) {
+    ordersEl.onclick = function (e) {
+      let node = e && e.target ? e.target : null;
+      while (node && node !== ordersEl) {
+        if (node.getAttribute && node.getAttribute('data-order-id')) {
+          const oid = node.getAttribute('data-order-id');
+          if (runBtn && runBtn.disabled) return;
+          startRun(oid).catch(err => {
+            setStatus('failed to start');
+            setRunMeta('-', 'start error');
+            if (runBtn) runBtn.disabled = false;
+            if (processLogEl) processLogEl.textContent = 'Process:' + String.fromCharCode(10) + '- [ui] start error: ' + String(err);
+            if (finalAnswerEl) {
+              finalAnswerEl.textContent = 'Failed to start run.';
+              finalAnswerEl.className = 'answer';
+            }
+          });
+          return;
+        }
+        node = node.parentNode;
+      }
     };
   }
 </script>
@@ -492,9 +591,14 @@ def index() -> str:
 
 
 @app.post('/api/runs')
-async def create_run() -> dict[str, str]:
+async def create_run(order_id: str = Query(default="XYZ-789")) -> dict[str, str]:
     run_id = uuid.uuid4().hex
     run = RunState(run_id=run_id)
+
+    # Store order_id as the first log event so the background runner can pick it up
+    # without changing the RunState dataclass.
+    _append_event(run, {"type": "run_started", "order_id": order_id.strip().lstrip('#').upper()})
+
     _RUNS[run_id] = run
 
     asyncio.create_task(_run_background(run))
